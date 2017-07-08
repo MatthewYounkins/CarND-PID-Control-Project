@@ -1,6 +1,8 @@
 #ifndef PID_H
 #define PID_H
 
+
+
 class PID {
 public:
   /*
@@ -9,6 +11,10 @@ public:
   double p_error;
   double i_error;
   double d_error;
+  double q_error;
+  int	 lapNum;
+  //int	 newLap;
+  double rightTurnSum;
 
   /*
   * Coefficients
@@ -16,7 +22,8 @@ public:
   double Kp;
   double Ki;
   double Kd;
-
+  double fM;
+  double Kq;
   /*
   * Constructor
   */
@@ -30,13 +37,16 @@ public:
   /*
   * Initialize PID.
   */
-  void Init(double Kp, double Ki, double Kd);
+  //void Init(double Kp, double Ki, double Kd, double fM, double fp);
+  void Init(double Kp, double Ki, double Kd, double fM, double Kq, int lapNum);
 
   /*
   * Update the PID error variables given cross track error.
   */
-  void UpdateError(double cte);
-
+  double UpdateError(double cte);
+  
+  int UpdateLap(double steering_angle);
+  
   /*
   * Calculate the total PID error.
   */
