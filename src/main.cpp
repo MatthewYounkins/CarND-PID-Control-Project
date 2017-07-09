@@ -33,71 +33,90 @@ std::string hasData(std::string s) {
 int main(int argc, char *argv[])
 {
   uWS::Hub h;
- 
   PID pid;
 
-	double 	init_Kp	= atof(argv[1]);
-	double 	init_Ki = atof(argv[2]);
-	double 	init_Kd = atof(argv[3]);
-	double 	init_fM = atof(argv[4]);
-	double 	init_Kq = atof(argv[5]);
-	int 	lapNum	= 0;
-
-
-	pid.Init(init_Kp, init_Ki, init_Kd, init_fM, init_Kq, lapNum);
-  
-  
-	h.onMessage([&pid](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode) {
+  double init_Kp 	= atof(argv[1]);
+  double init_Ki 	= atof(argv[2]);
+  double init_Kd 	= atof(argv[3]);
+  double init_fM 	= atof(argv[4]);
+  double init_Kq    = atof(argv[5]);
+  double init_Score = 0;
+//	int 	lapNum	= 0;
+//	pid.Init(init_Kp, init_Ki, init_Kd, init_fM, init_Kq, init_score, lapNum);
+ 
+ 
+	pid.Init(init_Kp, init_Ki, init_Kd, init_fM, init_Kq, init_Score);
+ 
+	h.onMessage([&pid](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode)
+	{
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
     if (length && length > 2 && data[0] == '4' && data[1] == '2')
     {
       auto s = hasData(std::string(data).substr(0, length));
-      if (s != "") {
+      if (s != "") 
+			{
         auto j = json::parse(s);
         std::string event = j[0].get<std::string>();
-        if (event == "telemetry") {
-			// j[1] is the data JSON object
-			double cte = std::stod(j[1]["cte"].get<std::string>());
-			double speed = std::stod(j[1]["speed"].get<std::string>());
-			double angle = std::stod(j[1]["steering_angle"].get<std::string>());
-			double steer_value;
-			double anAcceleratorPedalIsNotAThrottle;
+        if (event == "telemetry") 
+				{
+          
+					
+					// Initialize variables
+          double cte = std::stod(j[1]["cte"].get<std::string>());
+          double speed = std::stod(j[1]["speed"].get<std::string>());
+          double angle = std::stod(j[1]["steering_angle"].get<std::string>());
+          double steer_value;
+          double anAcceleratorPedalIsNotAThrottle;
+		  		double iError = pid.UpdateError(cte);
+		  		//int lapCounter = pid.UpdateLap(angle);  //uncomment upon figuring out how to do lap counters
+					//double lapNum = pid.UpdateLap(angle);
+		  
+
+
 			
-			
-			int lapCounter = pid.UpdateLap(angle);
-			
-			
-		  
-			double iError = pid.UpdateError(cte);
-			//double lapNum = pid.UpdateLap(angle);
-			//steer_value = pid.TotalError()+init_Kdd*(oldCTE-cte);
-			steer_value = pid.TotalError();
-			if(steer_value>1) steer_value = 1;
-			if(steer_value<-1) steer_value = -1;
-		  
-		  
-		  
-			double speedMult = 1;
-			if (speed < 10) speedMult = 0.1*speed;
-		  
-			anAcceleratorPedalIsNotAThrottle = 0.8 - 0.3*fabs(steer_value)-0.2*speedMult*fabs(cte);
-			//anAcceleratorPedalIsNotAThrottle = 0.02;
-		  
-		  
-			// DEBUG
-			std::cout << "lap:" << lapCounter << "CTE: " << cte << " Steering Value: " << steer_value <<  "  Angle: " << angle << "  Ierror  " << iError << std::endl;
-		
-		  
-			json msgJson;
-			msgJson["steering_angle"] = steer_value-.0176;			//0.0176 is a magic number... but steering of the simulator is slightly off
-			msgJson["throttle"] = anAcceleratorPedalIsNotAThrottle;
-			auto msg = "42[\"steer\"," + msgJson.dump() + "]";
-			//std::cout << msg << std::endl;
-			ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
-        }
-      } else {
+					// Calculate the steering value
+					steer_value = pid.TotalError();
+					if(steer_value>1) steer_value = 1;				//max'ing out the steering to full right (lock)
+					if(steer_value<-1) steer_value = -1;			//min'ing out the steering to full left  (lock)
+						
+				
+				
+					
+					// The next set of four uncommented lines set the APP/TrqReq. 
+					// While on the centerline and not steering, the APP is at 80%.
+					// While deviating from centerline (CTE), we reduce APP by 20% per meter when speed is greater than 10MPH.
+					// Below 10 MPH, we mitigate this reduction with speedMult so that we're never in the position where large...
+					// ...cte results in an inability to increase APP.  Of course this means low speed when off-roading, but I think that's OK.
+					double speedMult = 1;							
+					if (speed < 10) speedMult = 0.1*speed;		//Gradually bring down the multiplier
+					if (speed <  0) speedMult = 0;						//Negative speeds are possible, let's eliminate the variance with high reverse speeds
+					anAcceleratorPedalIsNotAThrottle = 0.8 - 0.4*fabs(steer_value)-0.2*speedMult*fabs(cte);
+					
+					
+					
+					
+					// pidScore is an inverted cost function.  See PID.cpp and PID.h for a full description, but high score = good.
+					// plus it makes it even more like a video game.
+					double pidScore = floor(pid.UpdateScore(cte, speed, angle));
+        
+
+				
+				
+				
+					// Echo out to the console.
+					std::cout << " Score:"  << pidScore  << " CTE:" << cte << " Steer:" << steer_value <<  " Angle:" << angle << " Ierror:" << iError << " Speed:" << speed << std::endl;
+					json msgJson;
+					msgJson["steering_angle"] = steer_value-.0176;			//0.0176 is a magic number... but steering is slightly off without it
+					msgJson["throttle"] = anAcceleratorPedalIsNotAThrottle;
+					auto msg = "42[\"steer\"," + msgJson.dump() + "]";
+					//std::cout << msg << std::endl;
+					ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
+				}
+      } 
+			else
+			{
         // Manual driving
         std::string msg = "42[\"manual\",{}]";
         ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
